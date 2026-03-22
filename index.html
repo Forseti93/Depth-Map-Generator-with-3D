@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local 3D Depth Map Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #1a1a1a; color: white; }
+        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 0; }
+        #ui-layer { position: absolute; top: 0; left: 0; z-index: 10; pointer-events: none; }
+        .interactive { pointer-events: auto; }
+        input[type="range"] { accent-color: #3b82f6; }
+    </style>
+</head>
+<body class="font-sans antialiased">
+
+    <!-- 3D Canvas -->
+    <div id="canvas-container"></div>
+
+    <!-- UI Overlay -->
+    <div id="ui-layer" class="w-full h-full p-6 flex flex-col justify-start items-start">
+        <div class="interactive bg-neutral-900/80 backdrop-blur-md border border-neutral-700 p-6 rounded-2xl shadow-2xl w-80 flex flex-col gap-5 transition-all duration-300">
+            <!-- Header (Clickable) -->
+            <div id="panel-header" class="flex justify-between items-start cursor-pointer group">
+                <div>
+                    <h1 class="text-xl font-bold mb-1">Depth Map 3D</h1>
+                    <p class="text-xs text-neutral-400">
+                        <a href="https://www.linkedin.com/in/serhii-lavrenov/" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()" class="hover:text-blue-400 transition-colors underline decoration-neutral-600 underline-offset-2">Developer's LinkedIn</a>
+                    </p>
+                </div>
+                <button class="p-1 text-neutral-400 group-hover:text-white transition-colors">
+                    <svg id="panel-toggle-icon" class="w-5 h-5 transition-transform duration-200" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" /></svg>
+                </button>
+            </div>
+
+            <!-- Content Wrapper -->
+            <div id="panel-content" class="flex flex-col gap-5">
+                <!-- Upload -->
+                <div>
+                    <label class="block text-sm font-medium mb-2">1. Select Photo</label>
+                    <input type="file" id="image-upload" accept="image/*" class="hidden" />
+                    <label for="image-upload" id="upload-btn" class="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 text-sm font-semibold text-white rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-2">
+                        <svg id="upload-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+                        <svg id="upload-spinner" class="hidden animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span id="upload-text">Choose File</span>
+                    </label>
+                </div>
+
+            <!-- Status -->
+            <div id="status-container" class="hidden flex-col gap-2">
+                <div class="flex justify-between items-center text-xs font-medium">
+                    <div class="flex items-center gap-2">
+                        <svg id="status-spinner" class="hidden animate-spin h-3.5 w-3.5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span id="status-text" class="text-blue-400">Loading model...</span>
+                    </div>
+                    <span id="status-pct">0%</span>
+                </div>
+                <div id="progress-bar-container" class="w-full bg-neutral-800 rounded-full h-1.5">
+                    <div id="status-bar" class="bg-blue-500 h-1.5 rounded-full transition-all duration-200" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <!-- Controls (Hidden until ready) -->
+            <div id="controls-container" class="hidden flex-col gap-4">
+                <div>
+                    <label class="flex justify-between text-sm font-medium mb-2">
+                        <span>2. Set Depth (cm)</span>
+                        <span id="depth-val" class="text-blue-400 font-mono">50cm</span>
+                    </label>
+                    <input type="range" id="depth-slider" min="0" max="100" value="50" class="w-full h-2 bg-neutral-800 rounded-lg appearance-none cursor-pointer">
+                </div>
+                
+                <div class="mt-2 flex flex-col gap-3">
+                    <div>
+                        <span class="block text-xs text-neutral-400 mb-2">Generated Depth Map:</span>
+                        <canvas id="depth-preview" class="w-full h-auto rounded border border-neutral-700 bg-black max-h-32 object-contain"></canvas>
+                    </div>
+                    <button id="download-btn" class="w-full py-2 px-4 bg-neutral-800 hover:bg-neutral-700 text-sm font-medium rounded-lg transition-colors border border-neutral-700 flex items-center justify-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                        Download Depth Map
+                    </button>
+                </div>
+            </div>
+            </div> <!-- End Content Wrapper -->
+        </div>
+    </div>
+
+    <!-- Globe Widget Overlay -->
+    <div id="globe-widget-container" class="hidden absolute bottom-6 right-6 z-20 flex flex-col items-center gap-2 interactive">
+        <span class="text-xs text-neutral-400 font-medium bg-neutral-900/60 px-2 py-1 rounded backdrop-blur">Drag to Rotate</span>
+        <div id="globe-widget" class="w-24 h-24 bg-neutral-900/80 backdrop-blur-md rounded-full border border-neutral-600 shadow-xl cursor-grab overflow-hidden"></div>
+    </div>
+
+    <!-- Module Script -->
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        // UPGRADE: Switch to Transformers.js V3 to support newer ONNX models
+        import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.0/dist/transformers.min.js';
+
+        // Force browser cache for local execution
+        env.allowLocalModels = false;
+
+        // --- DOM Elements ---
+        const uploadInput = document.getElementById('image-upload');
+        const uploadBtn = document.getElementById('upload-btn');
+        const uploadIcon = document.getElementById('upload-icon');
+        const uploadSpinner = document.getElementById('upload-spinner');
+        const uploadText = document.getElementById('upload-text');
+        const statusContainer = document.getElementById('status-container');
+        const statusText = document.getElementById('status-text');
+        const statusPct = document.getElementById('status-pct');
+        const statusBar = document.getElementById('status-bar');
+        const statusSpinner = document.getElementById('status-spinner');
+        const progressBarContainer = document.getElementById('progress-bar-container');
+        const controlsContainer = document.getElementById('controls-container');
+        const depthSlider = document.getElementById('depth-slider');
+        const depthValText = document.getElementById('depth-val');
+        const depthPreviewCanvas = document.getElementById('depth-preview');
+        const container = document.getElementById('canvas-container');
+        const downloadBtn = document.getElementById('download-btn');
+        const globeWidgetContainer = document.getElementById('globe-widget-container');
+        const globeWidget = document.getElementById('globe-widget');
+        const panelHeader = document.getElementById('panel-header');
+        const panelContent = document.getElementById('panel-content');
+        const panelToggleIcon = document.getElementById('panel-toggle-icon');
+
+        // --- UI Interactions ---
+        let isPanelOpen = true;
+        panelHeader.addEventListener('click', () => {
+            isPanelOpen = !isPanelOpen;
+            if (isPanelOpen) {
+                panelContent.classList.remove('hidden');
+                panelToggleIcon.classList.remove('rotate-180');
+            } else {
+                panelContent.classList.add('hidden');
+                panelToggleIcon.classList.add('rotate-180');
+            }
+        });
+
+        // --- State ---
+        let estimator = null;
+        let scene, camera, renderer, controls, mesh;
+        let globeScene, globeCamera, globeRenderer, globeMesh;
+        let currentImageObjUrl = null;
+        let diffTexture, depthTexture;
+
+        // --- Three.js Setup ---
+        function initThree() {
+            scene = new THREE.Scene();
+            
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 5000);
+            camera.position.set(0, -800, 800);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            container.appendChild(renderer.domElement);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+
+            // Lighting to emphasize depth
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            scene.add(ambientLight);
+            
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(100, 500, 500);
+            scene.add(dirLight);
+
+            window.addEventListener('resize', onWindowResize);
+            animate();
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+            if (globeRenderer && globeScene && globeCamera) {
+                globeRenderer.render(globeScene, globeCamera);
+            }
+        }
+
+        // --- Globe Setup ---
+        function initGlobe() {
+            globeScene = new THREE.Scene();
+            globeCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+            globeCamera.position.z = 2.5;
+
+            globeRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            globeRenderer.setSize(96, 96);
+            globeWidget.appendChild(globeRenderer.domElement);
+
+            const geometry = new THREE.SphereGeometry(1, 16, 16);
+            const material = new THREE.MeshBasicMaterial({ color: 0x3b82f6, wireframe: true });
+            globeMesh = new THREE.Mesh(geometry, material);
+            globeScene.add(globeMesh);
+
+            let isDragging = false;
+            let prevX = 0, prevY = 0;
+
+            globeWidget.addEventListener('pointerdown', (e) => {
+                isDragging = true;
+                prevX = e.clientX;
+                prevY = e.clientY;
+                globeWidget.style.cursor = 'grabbing';
+                e.target.setPointerCapture(e.pointerId);
+            });
+
+            globeWidget.addEventListener('pointermove', (e) => {
+                if (!isDragging || !mesh) return;
+                const deltaX = e.clientX - prevX;
+                const deltaY = e.clientY - prevY;
+                prevX = e.clientX;
+                prevY = e.clientY;
+
+                // Rotate around world axes for intuitive trackball control
+                mesh.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), deltaX * 0.01);
+                mesh.rotateOnWorldAxis(new THREE.Vector3(1, 0, 0), deltaY * 0.01);
+                
+                // Sync globe rotation
+                globeMesh.quaternion.copy(mesh.quaternion);
+            });
+
+            globeWidget.addEventListener('pointerup', (e) => {
+                isDragging = false;
+                globeWidget.style.cursor = 'grab';
+                e.target.releasePointerCapture(e.pointerId);
+            });
+        }
+
+        // --- ML Pipeline Setup ---
+        async function loadModel() {
+            if (estimator) return estimator;
+            statusContainer.classList.remove('hidden');
+            
+            // UPGRADE: Use Depth Anything V2 (Base) from the official onnx-community. 
+            // Dramatically better at fine local details (faces, hair, textures).
+            estimator = await pipeline('depth-estimation', 'onnx-community/depth-anything-v2-base', {
+                progress_callback: (info) => {
+                    if (info.status === 'downloading') {
+                        statusSpinner.classList.add('hidden');
+                        progressBarContainer.classList.remove('hidden');
+                        statusText.innerText = `Downloading model (${info.file})...`;
+                        const progress = Math.round(info.progress || 0);
+                        statusBar.style.width = `${progress}%`;
+                        statusPct.innerText = `${progress}%`;
+                    } else if (info.status === 'ready') {
+                        statusText.innerText = 'Model initialized.';
+                        statusBar.style.width = `100%`;
+                        statusPct.innerText = `100%`;
+                        setTimeout(() => statusContainer.classList.add('hidden'), 1000);
+                    }
+                }
+            });
+            return estimator;
+        }
+
+        // --- Core Logic ---
+        uploadInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            // Set Button Loading State
+            uploadBtn.classList.add('pointer-events-none', 'opacity-75');
+            uploadIcon.classList.add('hidden');
+            uploadSpinner.classList.remove('hidden');
+            uploadText.innerText = 'Processing...';
+
+            // Reset UI
+            controlsContainer.classList.add('hidden');
+            statusContainer.classList.remove('hidden');
+            statusSpinner.classList.add('hidden');
+            progressBarContainer.classList.remove('hidden');
+            statusText.innerText = 'Processing image...';
+            statusBar.style.width = '100%';
+            statusPct.innerText = '';
+
+            try {
+                // 1. Get image url & Load Model
+                if (currentImageObjUrl) URL.revokeObjectURL(currentImageObjUrl);
+                currentImageObjUrl = URL.createObjectURL(file);
+                const model = await loadModel();
+
+                // 2. Run Inference
+                statusText.innerText = 'Estimating depth...';
+                statusSpinner.classList.remove('hidden');
+                progressBarContainer.classList.add('hidden');
+                
+                const output = await model(currentImageObjUrl);
+                
+                // 3. Process raw tensor to Canvas
+                const depthData = output.depth; // RawImage (grayscale)
+                depthPreviewCanvas.width = depthData.width;
+                depthPreviewCanvas.height = depthData.height;
+                const ctx = depthPreviewCanvas.getContext('2d');
+                const imgData = ctx.createImageData(depthData.width, depthData.height);
+                
+                // Convert 1-channel to 4-channel RGBA
+                for (let i = 0; i < depthData.data.length; i++) {
+                    const val = depthData.data[i];
+                    imgData.data[i * 4] = val;       // R
+                    imgData.data[i * 4 + 1] = val;   // G
+                    imgData.data[i * 4 + 2] = val;   // B
+                    imgData.data[i * 4 + 3] = 255;   // A
+                }
+                ctx.putImageData(imgData, 0, 0);
+
+                // 4. Update 3D Scene
+                build3DMesh(currentImageObjUrl, depthPreviewCanvas.toDataURL(), depthData.width, depthData.height);
+
+                // 5. Update UI
+                controlsContainer.classList.remove('hidden');
+                statusContainer.classList.add('hidden');
+                updateDisplacement();
+
+            } catch (err) {
+                console.error(err);
+                statusSpinner.classList.add('hidden');
+                statusText.innerText = 'Error processing image.';
+                statusText.classList.replace('text-blue-400', 'text-red-500');
+            } finally {
+                // Restore Button State
+                uploadBtn.classList.remove('pointer-events-none', 'opacity-75');
+                uploadIcon.classList.remove('hidden');
+                uploadSpinner.classList.add('hidden');
+                uploadText.innerText = 'Choose File';
+                // Reset input value so the same file can be selected again if needed
+                uploadInput.value = '';
+            }
+        });
+
+        function build3DMesh(diffuseUrl, depthUrl, imgWidth, imgHeight) {
+            // Cleanup previous mesh
+            if (mesh) {
+                mesh.geometry.dispose();
+                mesh.material.dispose();
+                scene.remove(mesh);
+            }
+            if (diffTexture) diffTexture.dispose();
+            if (depthTexture) depthTexture.dispose();
+
+            const textureLoader = new THREE.TextureLoader();
+            
+            diffTexture = textureLoader.load(diffuseUrl);
+            diffTexture.colorSpace = THREE.SRGBColorSpace;
+            
+            depthTexture = textureLoader.load(depthUrl);
+
+            // Scale logic: base height is 1000 units (= 1000mm)
+            const aspect = imgWidth / imgHeight;
+            const planeHeight = 1000;
+            const planeWidth = planeHeight * aspect;
+
+            // UPGRADE: Massively increase geometry resolution. 
+            // Faces need high vertex density to physically displace small features like noses/eyes.
+            const segY = 1024; 
+            const segX = Math.min(1536, Math.floor(segY * aspect));
+            const geometry = new THREE.PlaneGeometry(planeWidth, planeHeight, segX, segY);
+
+            const material = new THREE.MeshStandardMaterial({
+                map: diffTexture,
+                displacementMap: depthTexture,
+                displacementScale: parseFloat(depthSlider.value) * 10,
+                side: THREE.DoubleSide,
+                roughness: 0.6,
+                metalness: 0.1
+            });
+
+            mesh = new THREE.Mesh(geometry, material);
+            // Rotate to lay flat like a table
+            mesh.rotation.x = -Math.PI / 2;
+            scene.add(mesh);
+
+            // Sync globe to initial state
+            if (globeMesh) globeMesh.quaternion.copy(mesh.quaternion);
+            globeWidgetContainer.classList.remove('hidden'); // Show widget
+
+            // Reset Camera framing
+            camera.position.set(0, planeHeight * 0.8, planeHeight * 0.8);
+            controls.target.set(0, 0, 0);
+        }
+
+        // --- Slider Binding ---
+        function updateDisplacement() {
+            const val = depthSlider.value;
+            depthValText.innerText = `${val}cm`;
+            if (mesh && mesh.material) {
+                mesh.material.displacementScale = parseFloat(val) * 10;
+            }
+        }
+
+        depthSlider.addEventListener('input', updateDisplacement);
+
+        downloadBtn.addEventListener('click', () => {
+            const link = document.createElement('a');
+            link.download = 'depth-map.png';
+            link.href = depthPreviewCanvas.toDataURL('image/png');
+            link.click();
+        });
+
+        // --- Bootstrap ---
+        initThree();
+        initGlobe();
+    </script>
+</body>
+</html>
